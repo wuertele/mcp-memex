@@ -17,20 +17,30 @@ what quality bar.*
 
 ## Overview
 
-The MVP path to v0.1.0 is ten sprints, divided into four tracks:
+The MVP path to v0.1.0 is eleven sprints, divided into five tracks:
 
-1. **Schema** (sprint 001) — establish the database layer
-2. **MCP Server** (sprints 002–004) — build the memex-native server
-3. **Sync Daemon** (sprints 005–007) — build the bidirectional sync
-4. **Validation and Release** (sprints 008–010) — integration test,
+1. **Test platform** (sprint 000) — establish the test infrastructure
+2. **Schema** (sprint 001) — establish the database layer
+3. **MCP Server** (sprints 002–004) — build the memex-native server
+4. **Sync Daemon** (sprints 005–007) — build the bidirectional sync
+5. **Validation and Release** (sprints 008–010) — integration test,
    document, release
 
 After v0.1.0, a post-release stream covers OB1 contributions and the
 feature backlog from architecture Section 12.
 
+**Sprint numbering is not load-bearing.** The numbers exist for
+ordering and ledger tracking, not for permanent identification.
+Reality often reveals "side quests" — work that's necessary but
+unanticipated — and inserting those sprints may renumber later
+ones. The dependency graph below is the authoritative ordering;
+numbers are aliases for convenience.
+
 ### Dependency Graph
 
 ```
+000 (Test platform)
+  ↓
 001 (Schema)
   ↓
 002 (Server: scaffold + read tools)
@@ -52,9 +62,10 @@ feature backlog from architecture Section 12.
                                  010 (v0.1.0 release)
 ```
 
-Sprints 001–004 and 005–007 form two parallel tracks that converge
-at 008. In practice this is a single-operator project so the tracks
-run sequentially, but the server and the daemon have no runtime
+Sprint 000 is foundational and blocks everything else. Sprints
+001–004 and 005–007 form two tracks that converge at 008. In
+practice this is a single-operator project so the tracks run
+sequentially, but the server and the daemon have no runtime
 dependency on each other within a sprint — either track can be
 paused and resumed.
 
@@ -64,6 +75,7 @@ Rough sizing, in the operator's part-time working hours:
 
 | Sprint | Estimated effort |
 |---|---|
+| 000 Test platform | 2–3 days |
 | 001 Schema | 2–3 days |
 | 002 Server: read tools | 3–5 days |
 | 003 Server: capture (B3) | 3–5 days |
@@ -75,9 +87,239 @@ Rough sizing, in the operator's part-time working hours:
 | 009 Documentation | 2–3 days |
 | 010 v0.1.0 release | 1 day |
 
-Total: approximately **25–40 days of part-time work**. Actual pace
+Total: approximately **27–43 days of part-time work**. Actual pace
 depends on the operator's availability and how often sprint reviews
 surface rework.
+
+## Testing Strategy
+
+Tests are run against an **ephemeral, Docker-based test environment**
+that spins up fresh PostgreSQL, a mock inference API, and a local
+git remote on demand. This environment is established in sprint 000
+and extended by subsequent sprints as their testing needs grow.
+
+### Why Ephemeral, Not Existing Infrastructure
+
+The operator has an existing GitLab instance and a PostgreSQL
+database on the NAS. Neither is used for routine testing. Using
+them would create:
+
+- **Shared state across test runs**, causing tests to see leftovers
+  from previous runs and concurrent runs to interfere with each
+  other.
+- **Test pollution on real infrastructure**, where failed cleanup
+  leaves cruft on production services.
+- **Coupling tests to the operator's specific setup**, which
+  prevents external contributors (and future-self setting up a new
+  laptop) from running the test suite.
+- **Credential management overhead** for real services when a local
+  test environment needs no credentials at all.
+- **Slower feedback** from tests that push to a remote server
+  versus tests that use a local `file://` git remote.
+
+The existing infrastructure remains valuable for **manual smoke
+testing** after the MVP is deployed (sprint 008 includes a manual
+run against the real Mycofu deployment) and for **scale
+validation** with realistic corpus sizes. Both are occasional
+activities, not routine CI.
+
+### Test Platform Components
+
+- **PostgreSQL 16+ with pgvector** via the `pgvector/pgvector:pg16`
+  Docker image. Started per test run via Docker Compose (through
+  Colima on macOS). Wiped between runs.
+- **Mock inference service** — a ~50-line Deno HTTP server that
+  provides an OpenRouter-compatible API with deterministic
+  responses. Returns pre-generated 1536-dim vectors from a hash of
+  input text for embeddings, returns canned JSON for chat
+  completions. Tests request specific failure modes via special
+  input values (`__fail_embed__`, `__slow_embed__`).
+- **Local bare git remote** — created per test run in a tmpdir
+  with `git init --bare /tmp/test-wiki-$$.git`. No network, no
+  auth, no cleanup burden beyond `rm -rf`.
+- **Canonicalization test vectors** — a shared
+  `tests/fixtures/canonicalization-cases.json` file with input /
+  expected-output pairs covering CRLF, BOM, NFD Unicode, trailing
+  whitespace, and edge cases. The SQL trigger, the server's
+  `canonicalize.ts`, and the daemon's `canonicalize.py` all test
+  against this file. Drift between the three implementations
+  becomes a test failure.
+- **GitHub Actions CI** — runs the same Docker Compose environment
+  on every push and pull request. Free for public repositories.
+- **One-button test runner** — `./tests/run-tests.sh` starts the
+  compose environment, runs the suite, and tears down on exit.
+
+### Test Categories
+
+- **Unit tests** run in isolation with no external dependencies.
+  Located in `tests/unit/`. Fast; run on every save.
+- **Database integration tests** run against the Docker Compose
+  PostgreSQL. Validate migrations, triggers, generated columns,
+  role permissions.
+- **Server integration tests** run the MCP server against the
+  compose environment, exercise MCP tools over real HTTP, validate
+  responses.
+- **Sync daemon integration tests** run the daemon against a test
+  git remote and database, validate full sync cycles.
+- **End-to-end tests** (sprint 008) spin up the server and daemon
+  together with a populated wiki and database, exercise realistic
+  scenarios (operator edits, AI captures, conflicts, deletions,
+  rebuild from git).
+- **Adversarial tests** (sprint 007) specifically target edge
+  cases the normal test suite doesn't exercise: crashes mid-cycle,
+  concurrent operator commits during sync, three-way conflicts,
+  corrupted sync_state recovery.
+
+### Test Platform Ownership
+
+Sprint 000 establishes the platform. Subsequent sprints extend it:
+
+- Sprint 001 adds schema-level database tests
+- Sprint 002 adds server unit and integration tests
+- Sprint 003 extends the mock inference service with capture-path
+  failure modes
+- Sprint 005 adds wiki fixtures for sync daemon tests
+- Sprint 007 adds adversarial test harnesses
+- Sprint 008 adds end-to-end test scenarios
+
+The test platform is designed to be extended, not rebuilt. Each
+sprint that touches it commits the extensions alongside the feature
+code they test.
+
+### Required Tools on the Developer Workstation
+
+- **Colima** — open-source container runtime for macOS. Install
+  with `brew install colima docker`. Start with `colima start`.
+- **Deno** — for the server code and its tests. Install with
+  `brew install deno`.
+- **Python 3.10+** — for the daemon code and its tests. Already
+  installed on the operator's workstation.
+- **PostgreSQL client tools (psql)** — for debugging and manual
+  inspection of test databases. Install with
+  `brew install postgresql@16`.
+
+Docker Desktop works as an alternative to Colima if already
+installed. Colima is recommended for fresh setups because it is
+open-source and has lower overhead.
+
+---
+
+## Sprint 000: Test Platform and CI Scaffolding
+
+### Motivation
+
+Every subsequent sprint runs tests. This sprint establishes the
+test infrastructure all other sprints depend on: an ephemeral
+Docker Compose environment with PostgreSQL and a mock inference
+service, shared test fixtures, a one-button test runner, and
+CI via GitHub Actions. Without this sprint, sprint 001 cannot
+validate that its migrations work.
+
+### Scope
+
+**In scope:**
+
+- `tests/compose.yaml` — Docker Compose file that brings up
+  PostgreSQL 16+ with pgvector on port 55432 and a mock inference
+  service on port 58000
+- `tests/mock-inference/` — a ~50-line Deno HTTP server that
+  implements an OpenRouter-compatible API:
+  - `POST /embeddings` — returns deterministic 1536-dim vectors
+    computed from a hash of the input text
+  - `POST /chat/completions` — returns canned JSON responses from
+    a fixtures file
+  - `GET /health` — returns 200 OK
+  - Special input handling: `"__fail_embed__"` returns a 500
+    error, `"__slow_embed__"` delays the response by 5 seconds,
+    etc., for testing failure modes in later sprints
+- `tests/mock-inference/Dockerfile` — container image for the mock
+  service
+- `tests/fixtures/canonicalization-cases.json` — authoritative
+  test vectors for content canonicalization. Each entry is
+  `{input, expected}`. Covers CRLF, BOM, NFD Unicode, trailing
+  newlines, emoji, very long content. Used by the SQL trigger test
+  (in sprint 001), `canonicalize.ts` test (in sprint 003), and
+  `canonicalize.py` test (in sprint 005).
+- `tests/run-tests.sh` — one-button test runner that starts
+  compose, runs the test suite, and tears down on exit
+- `.github/workflows/test.yml` — GitHub Actions workflow that runs
+  unit and integration tests on every push and pull request
+- `tests/README.md` — contributor-facing documentation covering
+  prerequisites (Colima, Deno), how to run tests locally, and how
+  to add new test fixtures
+- A placeholder unit test (`tests/unit/smoke.test.ts`) that simply
+  asserts the test runner works end-to-end — this validates the
+  platform itself before any real code exists to test
+
+**Out of scope:**
+
+- Actual migrations (sprint 001)
+- Actual server or daemon code (later sprints)
+- Test fixtures for wiki content (sprint 005 adds these)
+- Server-specific or daemon-specific integration tests (later
+  sprints)
+- Performance benchmarking infrastructure (post-MVP)
+
+### Deliverables
+
+- `tests/compose.yaml` — Docker Compose with `pgvector/pgvector:pg16`
+  and the mock inference service
+- `tests/mock-inference/main.ts` — mock inference HTTP server
+- `tests/mock-inference/Dockerfile` — container image
+- `tests/mock-inference/fixtures/embeddings.json` — canned
+  embedding responses (initially small; grows as needed)
+- `tests/mock-inference/fixtures/chat.json` — canned chat
+  completion responses (initially small)
+- `tests/fixtures/canonicalization-cases.json` — canonicalization
+  test vectors
+- `tests/run-tests.sh` — runner script
+- `.github/workflows/test.yml` — CI workflow
+- `tests/README.md` — contributor documentation
+- `tests/unit/smoke.test.ts` — placeholder smoke test
+
+### Validation
+
+- `./tests/run-tests.sh` starts the compose environment, runs the
+  smoke test, tears down the environment, exits zero
+- The compose environment exposes PostgreSQL on `127.0.0.1:55432`
+  and the mock inference service on `127.0.0.1:58000`
+- `pg_isready -h 127.0.0.1 -p 55432` reports ready after compose
+  startup
+- `curl http://127.0.0.1:58000/health` returns 200 after compose
+  startup
+- The mock inference service returns deterministic vectors for
+  repeated requests with the same input
+- Special inputs (`__fail_embed__`, `__slow_embed__`) behave as
+  documented
+- The GitHub Actions workflow runs to completion on a test push
+  and shows a green check
+- `tests/README.md` is clear enough that a contributor who has
+  never seen the project can install Colima, clone the repo, and
+  run the tests successfully
+
+### Prerequisites
+
+None. This is the first sprint.
+
+### Architecture References
+
+None directly — this sprint establishes test infrastructure, not
+architectural components. The canonicalization test vectors
+reference architecture Section 6.4 as the authoritative rule
+source; later sprints (001, 003, 005) will use the vectors to
+verify their implementations against the rules.
+
+### Notes for sprint-plan
+
+- The mock inference service is deliberately minimal. Resist the
+  urge to make it "realistic." Determinism matters more than
+  realism for test reliability.
+- The canonicalization test vectors need the operator's input on
+  edge cases they care about. Include "known-weird" content the
+  operator has actually captured in their existing Supabase memex.
+- Colima configuration notes should live in `tests/README.md`, not
+  in scripts. Operators on non-macOS platforms will use Docker
+  Desktop or podman and need the flexibility.
 
 ---
 
@@ -101,8 +343,14 @@ builds the minimal migration runner that applies them.
   in order, records results with checksums
 - Create a `migrations/` directory in the repo root and place all
   SQL files there
-- Test migrations against a throwaway local PostgreSQL 16+ with
-  pgvector
+- Test migrations against the sprint 000 Docker Compose PostgreSQL
+  instance
+- Add schema-level database tests to `tests/integration/` that
+  verify migration application, idempotency, trigger behavior, and
+  the `canonicalize_thought_content()` function using the
+  `tests/fixtures/canonicalization-cases.json` vectors from sprint 000
+- Verify the PostgreSQL role permissions using the test runner
+  (memex_mcp cannot DELETE; memex_sync can)
 
 **Out of scope:**
 
@@ -116,10 +364,12 @@ builds the minimal migration runner that applies them.
 
 - `migrations/0001_initial_schema.sql` through `migrations/0009_add_roles.sql`
 - `scripts/memex-migrate` (runner)
-- `tests/test_migrations.sh` or equivalent — a test that spins up a
-  temporary PostgreSQL, applies all migrations, verifies the final
-  schema matches expectations
-- README documentation for how to run migrations manually
+- `tests/integration/test_migrations.ts` (or `.py`) — tests that
+  apply migrations, verify schema, test the canonicalization
+  trigger against the shared vectors, verify role permissions,
+  and confirm idempotency
+- Update `tests/run-tests.sh` to include the new integration tests
+- `migrations/README.md` documenting how to run migrations manually
 
 ### Validation
 
@@ -140,7 +390,7 @@ builds the minimal migration runner that applies them.
 
 ### Prerequisites
 
-None. This is the first sprint.
+- Sprint 000 complete (test platform exists)
 
 ### Architecture References
 
@@ -880,6 +1130,20 @@ depends on operator need, not a pre-committed order.
 
 ## Notes on Sprint Execution
 
+- **Sprint numbers are not load-bearing.** Numbers exist for
+  ordering and ledger tracking, not permanent identification.
+  Side-quest sprints — work that's necessary but unanticipated —
+  will be inserted over time. When a new sprint lands between
+  existing ones, either use a non-integer number (`001a`, `003b`)
+  if the ledger tolerates it, or renumber downstream sprints. The
+  ledger CLI supports arbitrary zero-padded IDs, so both approaches
+  work. When this roadmap is updated with new sprints, review the
+  dependency graph and the change log to keep them consistent.
+- **The dependency graph is authoritative.** If the numbering in
+  this document ever drifts from the graph, trust the graph. Sprint
+  prerequisites reference specific sprints by number, but readers
+  should cross-check the graph to make sure the ordering still makes
+  sense.
 - **Sprint granularity:** each sprint is designed to be 2–5 days of
   focused work. If a sprint turns out to need more, split it into
   two sprints rather than letting the scope grow. Scope creep
@@ -892,13 +1156,17 @@ depends on operator need, not a pre-committed order.
   builds the server's `canonicalize.ts`; sprint 005 builds the
   daemon's `canonicalize.py`. These two must stay byte-for-byte
   equivalent. Any fix or change to one requires the same fix to the
-  other. Both must be tested against the SQL trigger from migration
-  0004 as the single source of truth.
-- **Testing bar:** every sprint has unit tests for its own code.
-  Sprint 008 is the first end-to-end integration. If unit tests are
-  lax in any earlier sprint, sprint 008 surfaces the problems,
-  which is fine but slower than catching issues earlier. Lean
-  toward writing tests.
+  other. Both must be tested against the authoritative canonicalization
+  test vectors from sprint 000 (`tests/fixtures/canonicalization-cases.json`)
+  and against the SQL trigger from migration 0004 as the single
+  source of truth.
+- **Testing bar:** every sprint beyond sprint 000 writes tests
+  using the platform sprint 000 established. Unit tests run per
+  sprint; integration tests grow alongside features. Sprint 008 is
+  the first end-to-end integration that exercises the whole system.
+  If unit tests are lax in any earlier sprint, sprint 008 surfaces
+  the problems, which is fine but slower than catching issues
+  earlier. Lean toward writing tests.
 - **Review cadence:** each sprint is executed via the `sprint-execute`
   skill, which runs multi-agent review rounds (Claude, Codex, Gemini)
   until pass or the 3-round safety cap. Plan sprints with
@@ -907,6 +1175,15 @@ depends on operator need, not a pre-committed order.
   sprint needs its predecessors. Starting sprint 005 before sprint
   001 is done produces a daemon that doesn't have a schema to talk
   to.
+- **Side quests are expected.** During development it is normal to
+  discover that a sprint depends on infrastructure that doesn't
+  exist yet, or on a fix for a bug in a completed sprint, or on a
+  pattern that could be reused if extracted into its own sprint.
+  When this happens, don't try to cram the side quest into the
+  current sprint. Stop, file a new sprint for the side quest, and
+  resume the current sprint only after the side quest is complete.
+  Add the new sprint to the ledger, add it to this roadmap, update
+  the dependency graph, and adjust the change log.
 
 ---
 
@@ -915,3 +1192,4 @@ depends on operator need, not a pre-committed order.
 | Version | Date | Summary |
 |---|---|---|
 | draft 1 | 2026-04-12 | Initial roadmap with 10 sprints to v0.1.0 plus post-release ongoing streams. |
+| draft 2 | 2026-04-12 | Added sprint 000 (Test Platform and CI Scaffolding) as a foundational sprint blocking everything else. Added a Testing Strategy section describing the ephemeral Docker Compose environment (PostgreSQL via pgvector/pgvector:pg16, mock inference service, local file:// git remote, shared canonicalization test vectors, GitHub Actions CI). Updated the dependency graph and effort estimates. Added guidance to Notes on Sprint Execution about sprint renumbering, the authoritative dependency graph, and the "side quest" pattern for unanticipated work. Tool recommendation: Colima for container runtime on macOS. |
