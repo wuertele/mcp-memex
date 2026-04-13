@@ -1,5 +1,7 @@
 FROM denoland/deno:alpine-2.1.4
 
+RUN apk add --no-cache wget
+
 WORKDIR /app
 
 COPY deno.json ./
