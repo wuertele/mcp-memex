@@ -1,0 +1,25 @@
+# Editor and OS cruft
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+.#*
+\#*#
+
+# Local dev environment
+.env
+.env.local
+*.log
+node_modules/
+.deno/
+
+# Build output (for when the reference implementation is written)
+dist/
+build/
+target/
+
+# Local test data
+*.db
+*.sqlite
+tmp/
