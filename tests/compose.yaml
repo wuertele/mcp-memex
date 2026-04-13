@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: memex_test
+      POSTGRES_USER: memex_test
+      POSTGRES_PASSWORD: memex_test
+    ports:
+      - "127.0.0.1:55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memex_test -d memex_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 5s
+    networks:
+      - memex-test-net
+    volumes:
+      - /var/lib/postgresql/data
+
+  mock-inference:
+    build: ./mock-inference
+    ports:
+      - "127.0.0.1:58000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health || exit 1"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 5s
+    networks:
+      - memex-test-net
+
+networks:
+  memex-test-net:
+    driver: bridge

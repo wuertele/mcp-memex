@@ -1,0 +1,74 @@
+[
+  {
+    "name": "metadata-basic",
+    "request": {
+      "model": "openai/gpt-4o-mini",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Extract metadata from the note and return JSON only."
+        },
+        {
+          "role": "user",
+          "content": "Hello world"
+        }
+      ]
+    },
+    "response": {
+      "id": "chatcmpl-mock-001",
+      "object": "chat.completion",
+      "model": "openai/gpt-4o-mini",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "{\"topics\":[\"greeting\"],\"people\":[],\"type\":\"observation\"}"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      }
+    }
+  },
+  {
+    "name": "metadata-variant",
+    "request": {
+      "messages": [
+        {
+          "role": "system",
+          "content": "Extract metadata from the note and return JSON only."
+        },
+        {
+          "role": "user",
+          "content": "Alice shared the sprint roadmap for memex."
+        }
+      ],
+      "model": "openai/gpt-4o-mini"
+    },
+    "response": {
+      "id": "chatcmpl-mock-002",
+      "object": "chat.completion",
+      "model": "openai/gpt-4o-mini",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "{\"topics\":[\"roadmap\",\"planning\"],\"people\":[\"Alice\"],\"type\":\"reference\"}"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      }
+    }
+  }
+]
