@@ -1,2 +1,3 @@
 sprint_id	title	status	created_at	updated_at
 000	Test Platform and CI Scaffolding	completed	2026-04-13T02:58:49Z	2026-04-13T04:11:35Z
+001	Schema Migrations and Migration Runner	completed	2026-04-13T06:16:12Z	2026-04-13T14:29:17Z

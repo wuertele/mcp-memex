@@ -364,7 +364,7 @@ builds the minimal migration runner that applies them.
 
 - `migrations/0001_initial_schema.sql` through `migrations/0009_add_roles.sql`
 - `scripts/memex-migrate` (runner)
-- `tests/integration/test_migrations.ts` (or `.py`) — tests that
+- `tests/integration/migrations.test.ts` (or `.py`) — tests that
   apply migrations, verify schema, test the canonicalization
   trigger against the shared vectors, verify role permissions,
   and confirm idempotency

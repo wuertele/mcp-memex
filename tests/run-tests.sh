@@ -104,18 +104,38 @@ export MEMEX_TEST_DB_PORT=55432
 export MEMEX_TEST_DB_NAME=memex_test
 export MEMEX_TEST_DB_USER=memex_test
 export MEMEX_TEST_DB_PASSWORD=memex_test
+export PGHOST="${MEMEX_TEST_DB_HOST}"
+export PGPORT="${MEMEX_TEST_DB_PORT}"
+export PGDATABASE="${MEMEX_TEST_DB_NAME}"
+export PGUSER="${MEMEX_TEST_DB_USER}"
+export PGPASSWORD="${MEMEX_TEST_DB_PASSWORD}"
 export MEMEX_TEST_INFERENCE_BASE=http://127.0.0.1:58000
+export MEMEX_TEST_MCP_PASSWORD='memex_mcp_test_password'
+export MEMEX_TEST_SYNC_PASSWORD='memex_sync_test_password'
+export PSQL="docker compose -p memex-test -f tests/compose.yaml exec -T postgres psql"
 
-echo "[run-tests] running tests"
+echo "[run-tests] running unit tests"
 set +e
-deno task test
-test_exit_code=$?
+deno task test:unit
+unit_exit_code=$?
 set -e
 
-if (( test_exit_code != 0 )); then
+if (( unit_exit_code != 0 )); then
   echo "[run-tests] FAILED" >&2
   "${COMPOSE[@]}" logs --no-color >&2 || true
-  exit "${test_exit_code}"
+  exit "${unit_exit_code}"
+fi
+
+echo "[run-tests] running integration tests"
+set +e
+deno task test:integration
+integration_exit_code=$?
+set -e
+
+if (( integration_exit_code != 0 )); then
+  echo "[run-tests] FAILED" >&2
+  "${COMPOSE[@]}" logs --no-color >&2 || true
+  exit "${integration_exit_code}"
 fi
 
 echo "[run-tests] OK"
